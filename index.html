@@ -6,6 +6,7 @@
 <title>Bench — a small lab for tabular data</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
+<script src="https://www.lactame.com/lib/ml/6.0.0/ml.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
@@ -413,15 +414,15 @@ const state = {
 };
 
 const REGRESSION_MODELS = [
-  {id:'linreg', name:'Linear Regression', desc:'Closed-form least squares with light ridge regularization.'},
-  {id:'knn-reg', name:'K-Nearest Neighbors', desc:'Predicts by averaging the closest training rows.'},
-  {id:'tree-reg', name:'Decision Tree', desc:'Splits data into regions minimizing variance.'}
+  {id:'linreg', name:'Linear Regression', desc:'ml-regression-multivariate-linear — ordinary least squares.'},
+  {id:'tree-reg', name:'Decision Tree', desc:'ml-cart — CART regression tree.'},
+  {id:'forest-reg', name:'Random Forest', desc:'ml-random-forest — bagged ensemble of regression trees.'}
 ];
 const CLASSIFICATION_MODELS = [
-  {id:'logreg', name:'Logistic Regression', desc:'Softmax regression trained with gradient descent.'},
-  {id:'knn-clf', name:'K-Nearest Neighbors', desc:'Classifies by majority vote among nearest rows.'},
-  {id:'tree-clf', name:'Decision Tree', desc:'Splits data into regions minimizing class impurity.'},
-  {id:'nb', name:'Gaussian Naive Bayes', desc:'Assumes features are normally distributed per class.'}
+  {id:'forest-clf', name:'Random Forest', desc:'ml-random-forest — bagged ensemble of classification trees.'},
+  {id:'knn-clf', name:'K-Nearest Neighbors', desc:'ml-knn — k-d tree nearest neighbor classifier.'},
+  {id:'tree-clf', name:'Decision Tree', desc:'ml-cart — CART classification tree.'},
+  {id:'nb', name:'Gaussian Naive Bayes', desc:'ml-naivebayes — Gaussian Naive Bayes.'}
 ];
 
 /* =========================================================================
@@ -532,14 +533,15 @@ function loadSample(kind){
       {name:'Rosa', lenM:6.2, widM:3.7, kernelM:5.7, grooveM:6.0},
       {name:'Canadian', lenM:5.2, widM:2.9, kernelM:4.8, grooveM:5.0}
     ];
+    const noise = 3; // widens class overlap so accuracy isn't a trivial 100% (see chat notes)
     varieties.forEach(v=>{
       for(let i=0;i<80;i++){
-        const area = +(v.lenM*v.widM*0.6 + (rnd()-0.5)*1.5).toFixed(2);
-        const perimeter = +(area*0.72 + (rnd()-0.5)*0.8).toFixed(2);
-        const length = +(v.lenM + (rnd()-0.5)*0.6).toFixed(2);
-        const width = +(v.widM + (rnd()-0.5)*0.4).toFixed(2);
-        const kernelLength = +(v.kernelM + (rnd()-0.5)*0.5).toFixed(2);
-        const grooveLength = +(v.grooveM + (rnd()-0.5)*0.5).toFixed(2);
+        const area = +(v.lenM*v.widM*0.6 + (rnd()-0.5)*1.5*noise).toFixed(2);
+        const perimeter = +(area*0.72 + (rnd()-0.5)*0.8*noise).toFixed(2);
+        const length = +(v.lenM + (rnd()-0.5)*0.6*noise).toFixed(2);
+        const width = +(v.widM + (rnd()-0.5)*0.4*noise).toFixed(2);
+        const kernelLength = +(v.kernelM + (rnd()-0.5)*0.5*noise).toFixed(2);
+        const grooveLength = +(v.grooveM + (rnd()-0.5)*0.5*noise).toFixed(2);
         rows.push({area, perimeter, length, width, kernel_length:kernelLength, groove_length:grooveLength, variety:v.name});
       }
     });
@@ -679,45 +681,10 @@ function updateSplitReadout(){
 }
 
 /* =========================================================================
-   MATRIX UTILITIES
+   MATRIX UTILITIES (only what's still needed for confusion-matrix bookkeeping —
+   the models themselves no longer do their own linear algebra, see MODELS below)
    ========================================================================= */
 function zerosMat(r,c){ const m=new Array(r); for(let i=0;i<r;i++){ m[i]=new Array(c).fill(0);} return m; }
-function transpose(A){ const r=A.length, c=A[0].length; const T=zerosMat(c,r); for(let i=0;i<r;i++) for(let j=0;j<c;j++) T[j][i]=A[i][j]; return T; }
-function matmul(A,B){
-  const r=A.length, k=A[0].length, c=B[0].length;
-  const C=zerosMat(r,c);
-  for(let i=0;i<r;i++){
-    for(let p=0;p<k;p++){
-      const a=A[i][p];
-      if(a===0) continue;
-      const rowB=B[p];
-      for(let j=0;j<c;j++) C[i][j]+=a*rowB[j];
-    }
-  }
-  return C;
-}
-function identity(n,scale=1){ const I=zerosMat(n,n); for(let i=0;i<n;i++) I[i][i]=scale; return I; }
-function addMat(A,B){ return A.map((row,i)=>row.map((v,j)=>v+B[i][j])); }
-function addBiasColumn(X){ return X.map(row=>[1,...row]); }
-function inverse(A){
-  const n=A.length;
-  const M=A.map((row,i)=>[...row, ...identity(n)[i]]);
-  for(let col=0; col<n; col++){
-    let pivotRow=col, best=Math.abs(M[col][col]);
-    for(let r=col+1;r<n;r++){ if(Math.abs(M[r][col])>best){best=Math.abs(M[r][col]); pivotRow=r;} }
-    if(best<1e-10){ M[col][col]+= (M[col][col]>=0?1e-6:-1e-6); }
-    else if(pivotRow!==col){ const tmp=M[col]; M[col]=M[pivotRow]; M[pivotRow]=tmp; }
-    const pivot=M[col][col];
-    for(let j=0;j<2*n;j++) M[col][j]/=pivot;
-    for(let r=0;r<n;r++){
-      if(r===col) continue;
-      const factor=M[r][col];
-      if(factor===0) continue;
-      for(let j=0;j<2*n;j++) M[r][j]-=factor*M[col][j];
-    }
-  }
-  return M.map(row=>row.slice(n));
-}
 
 /* =========================================================================
    FEATURE ENCODING / PREPROCESSING
@@ -818,194 +785,57 @@ function applyStandardize(X, means, stds){
 }
 
 /* =========================================================================
-   MODELS
+   MODELS — every model below is the real mljs implementation, loaded as the
+   global `ML` from https://www.lactame.com/lib/ml/6.0.0/ml.min.js (npm: `ml`,
+   a UMD bundle of ml-regression-multivariate-linear, ml-cart, ml-random-forest,
+   ml-knn and ml-naivebayes). This app only handles preprocessing (encoding,
+   imputation, standardization, the train/test split) and evaluation — the
+   model fitting and prediction calls are the library's, not hand-rolled.
    ========================================================================= */
-
-// ---- Linear Regression (ridge, closed form) ----
-function trainLinearRegression(X, y, lambda=0.15){
-  const Xb = addBiasColumn(X);
-  const Xt = transpose(Xb);
-  const XtX = matmul(Xt, Xb);
-  const reg = identity(XtX.length, lambda);
-  reg[0][0]=0;
-  const XtXreg = addMat(XtX, reg);
-  const Y = y.map(v=>[v]);
-  const XtY = matmul(Xt, Y);
-  const coefMat = matmul(inverse(XtXreg), XtY);
-  return coefMat.map(r=>r[0]);
-}
-function predictLinearRegression(coef, X){
-  return X.map(row=>{
-    let s=coef[0];
-    for(let j=0;j<row.length;j++) s+=coef[j+1]*row[j];
-    return s;
-  });
-}
-
-// ---- Softmax (multinomial logistic) Regression ----
-function trainSoftmax(X, yIdx, k, lr=0.2, iters=350, lambda=0.02){
-  const n=X.length, p=X[0].length;
-  const Xb = addBiasColumn(X);
-  const pb = p+1;
-  let W = zerosMat(pb, k);
-  const Yoh = zerosMat(n, k);
-  for(let i=0;i<n;i++) Yoh[i][yIdx[i]]=1;
-  for(let it=0; it<iters; it++){
-    const logits = matmul(Xb, W); // n x k
-    const probs = logits.map(row=>softmax(row));
-    const diff = probs.map((row,i)=>row.map((v,j)=>v-Yoh[i][j])); // n x k
-    const grad = matmul(transpose(Xb), diff); // pb x k
-    for(let a=0;a<pb;a++){
-      for(let b=0;b<k;b++){
-        let g = grad[a][b]/n;
-        if(a!==0) g += lambda*W[a][b];
-        W[a][b] -= lr*g;
-      }
-    }
-  }
-  return W;
-}
-function softmax(row){
-  const m = Math.max(...row);
-  const exps = row.map(v=>Math.exp(v-m));
-  const sum = exps.reduce((a,b)=>a+b,0);
-  return exps.map(v=>v/sum);
-}
-function predictSoftmax(W, X){
-  const Xb = addBiasColumn(X);
-  const logits = matmul(Xb, W);
-  return logits.map(row=>{
-    const probs = softmax(row);
-    let best=0; for(let j=1;j<probs.length;j++) if(probs[j]>probs[best]) best=j;
-    return best;
-  });
-}
-
-// ---- K-Nearest Neighbors ----
 function knnK(nTrain){ let k=Math.round(Math.sqrt(nTrain)); k=Math.max(3,Math.min(15,k)); if(k%2===0) k+=1; return k; }
-function knnPredictAll(Xtrain, ytrain, Xtest, k, mode, numClasses){
-  return Xtest.map(xt=>{
-    const dists = Xtrain.map((xr,i)=>{
-      let s=0; for(let j=0;j<xr.length;j++){ const d=xr[j]-xt[j]; s+=d*d; }
-      return {d:s, i};
-    });
-    dists.sort((a,b)=>a.d-b.d);
-    const nn = dists.slice(0,k);
-    if(mode==='regression'){
-      let sum=0; nn.forEach(o=>sum+=ytrain[o.i]);
-      return sum/nn.length;
-    } else {
-      const counts = new Array(numClasses).fill(0);
-      nn.forEach(o=>counts[ytrain[o.i]]++);
-      let best=0; for(let c=1;c<numClasses;c++) if(counts[c]>counts[best]) best=c;
-      return best;
-    }
-  });
+
+// ---- Linear Regression : ml-regression-multivariate-linear ----
+function fitLinearRegression(Xtrain, ytrain){
+  return new ML.MultivariateLinearRegression(Xtrain, ytrain.map(v=>[v]));
+}
+function predictLinearRegression(model, Xtest){
+  return Xtest.map(row=>model.predict(row)[0]);
 }
 
-// ---- Decision Tree (CART) ----
-function buildTree(X, y, depth, maxDepth, minLeaf, mode, numClasses){
-  const n=X.length;
-  const isPure = mode==='classification' && y.every(v=>v===y[0]);
-  if(depth>=maxDepth || n<=minLeaf*2 || isPure){
-    return leafNode(y, mode, numClasses);
-  }
-  const p = X[0].length;
-  let best=null;
-  for(let j=0;j<p;j++){
-    const vals = Array.from(new Set(X.map(r=>r[j]))).sort((a,b)=>a-b);
-    if(vals.length<2) continue;
-    const numCandidates = Math.min(vals.length-1, 20);
-    const step = Math.max(1, Math.floor((vals.length-1)/numCandidates));
-    for(let vi=0; vi<vals.length-1; vi+=step){
-      const threshold = (vals[vi]+vals[vi+1])/2;
-      const leftIdx=[], rightIdx=[];
-      for(let i=0;i<n;i++){ if(X[i][j]<=threshold) leftIdx.push(i); else rightIdx.push(i); }
-      if(leftIdx.length<minLeaf || rightIdx.length<minLeaf) continue;
-      const score = mode==='regression'
-        ? weightedVariance(leftIdx.map(i=>y[i]), rightIdx.map(i=>y[i]))
-        : weightedGini(leftIdx.map(i=>y[i]), rightIdx.map(i=>y[i]), numClasses);
-      if(!best || score<best.score){
-        best = {score, feature:j, threshold, leftIdx, rightIdx};
-      }
-    }
-  }
-  if(!best) return leafNode(y, mode, numClasses);
-  const leftX = best.leftIdx.map(i=>X[i]), leftY = best.leftIdx.map(i=>y[i]);
-  const rightX = best.rightIdx.map(i=>X[i]), rightY = best.rightIdx.map(i=>y[i]);
-  return {
-    leaf:false, feature:best.feature, threshold:best.threshold,
-    left: buildTree(leftX, leftY, depth+1, maxDepth, minLeaf, mode, numClasses),
-    right: buildTree(rightX, rightY, depth+1, maxDepth, minLeaf, mode, numClasses)
-  };
+// ---- Decision Tree : ml-cart ----
+function fitDecisionTreeRegression(Xtrain, ytrain){
+  const reg = new ML.DecisionTreeRegression({maxDepth:8, minNumSamples:3});
+  reg.train(Xtrain, ytrain);
+  return reg;
 }
-function leafNode(y, mode, numClasses){
-  if(mode==='regression'){
-    const mean = y.reduce((a,b)=>a+b,0)/y.length;
-    return {leaf:true, value:mean};
-  } else {
-    const counts = new Array(numClasses).fill(0);
-    y.forEach(v=>counts[v]++);
-    let best=0; for(let c=1;c<numClasses;c++) if(counts[c]>counts[best]) best=c;
-    return {leaf:true, value:best};
-  }
-}
-function variance(arr){
-  if(arr.length===0) return 0;
-  const mean=arr.reduce((a,b)=>a+b,0)/arr.length;
-  return arr.reduce((s,v)=>s+(v-mean)**2,0)/arr.length;
-}
-function weightedVariance(left,right){
-  const n=left.length+right.length;
-  return (left.length/n)*variance(left) + (right.length/n)*variance(right);
-}
-function gini(arr, numClasses){
-  if(arr.length===0) return 0;
-  const counts=new Array(numClasses).fill(0);
-  arr.forEach(v=>counts[v]++);
-  let s=0; counts.forEach(c=>{ const p=c/arr.length; s+=p*p; });
-  return 1-s;
-}
-function weightedGini(left,right,numClasses){
-  const n=left.length+right.length;
-  return (left.length/n)*gini(left,numClasses) + (right.length/n)*gini(right,numClasses);
-}
-function predictTree(tree, x){
-  let node=tree;
-  while(!node.leaf){ node = (x[node.feature]<=node.threshold) ? node.left : node.right; }
-  return node.value;
+function fitDecisionTreeClassifier(Xtrain, ytrain){
+  const clf = new ML.DecisionTreeClassifier({gainFunction:'gini', maxDepth:8, minNumSamples:3});
+  clf.train(Xtrain, ytrain);
+  return clf;
 }
 
-// ---- Gaussian Naive Bayes ----
-function trainGNB(X, yIdx, numClasses){
-  const p = X[0].length;
-  const model = {priors:new Array(numClasses).fill(0), means:[], vars:[]};
-  for(let c=0;c<numClasses;c++){
-    const rows = X.filter((_,i)=>yIdx[i]===c);
-    model.priors[c] = rows.length / X.length;
-    const means=new Array(p).fill(0), vars=new Array(p).fill(1e-3);
-    for(let j=0;j<p;j++){
-      let sum=0; rows.forEach(r=>sum+=r[j]);
-      const mean = rows.length? sum/rows.length : 0;
-      let ss=0; rows.forEach(r=>ss+=(r[j]-mean)**2);
-      means[j]=mean; vars[j]=Math.max(1e-3, rows.length? ss/rows.length : 1e-3);
-    }
-    model.means.push(means); model.vars.push(vars);
-  }
-  return model;
+// ---- Random Forest : ml-random-forest ----
+function fitRandomForestRegression(Xtrain, ytrain){
+  const rf = new ML.RandomForestRegression({nEstimators:60, seed:42, replacement:true, maxFeatures:0.8});
+  rf.train(Xtrain, ytrain);
+  return rf;
 }
-function predictGNB(model, x){
-  const numClasses = model.priors.length;
-  let best=0, bestScore=-Infinity;
-  for(let c=0;c<numClasses;c++){
-    let score = Math.log(model.priors[c]+1e-12);
-    for(let j=0;j<x.length;j++){
-      const mean=model.means[c][j], v=model.vars[c][j];
-      score += -0.5*Math.log(2*Math.PI*v) - ((x[j]-mean)**2)/(2*v);
-    }
-    if(score>bestScore){ bestScore=score; best=c; }
-  }
-  return best;
+function fitRandomForestClassifier(Xtrain, ytrain){
+  const rf = new ML.RandomForestClassifier({nEstimators:60, seed:42, replacement:true, maxFeatures:0.8});
+  rf.train(Xtrain, ytrain);
+  return rf;
+}
+
+// ---- K-Nearest Neighbors : ml-knn (classification only) ----
+function fitKNNClassifier(Xtrain, ytrain, k){
+  return new ML.KNN(Xtrain, ytrain, {k});
+}
+
+// ---- Gaussian Naive Bayes : ml-naivebayes ----
+function fitNaiveBayes(Xtrain, ytrain){
+  const nb = new ML.NaiveBayes();
+  nb.train(Xtrain, ytrain);
+  return nb;
 }
 
 /* =========================================================================
@@ -1045,6 +875,7 @@ function runTraining(){
   if(state.features.length===0){ alert('Choose at least one independent variable.'); return; }
   if(state.selectedModels.size===0){ alert('Choose at least one model to train.'); return; }
   if(typeof Chart==='undefined'){ alert('The charting library failed to load from its CDN, so results can\'t be drawn yet. Check your network/ad-blocker settings and reload the page.'); return; }
+  if(typeof ML==='undefined'){ alert('The ml.js modeling library failed to load from its CDN, so no models can be trained yet. Check your network/ad-blocker settings and reload the page.'); return; }
 
   document.getElementById('trainStatus').style.display='flex';
   document.getElementById('runBtn').disabled=true;
@@ -1082,39 +913,39 @@ function runTraining(){
           let entry = {id:m.id, name:m.name};
           try{
             if(m.id==='linreg'){
-              const coef = trainLinearRegression(Xtrain, ytrain);
-              const pred = predictLinearRegression(coef, Xtest);
+              const model = fitLinearRegression(Xtrain, ytrain);
+              const pred = predictLinearRegression(model, Xtest);
               entry.metrics = regressionMetrics(ytest, pred);
               entry.pred = pred; entry.actual = ytest;
-              entry.coef = coef; entry.featureMeta = featureMeta;
-            } else if(m.id==='knn-reg'){
-              const k = knnK(Xtrain.length);
-              const pred = knnPredictAll(Xtrain, ytrain, Xtest, k, 'regression');
-              entry.metrics = regressionMetrics(ytest, pred);
-              entry.pred = pred; entry.actual = ytest; entry.k = k;
             } else if(m.id==='tree-reg'){
-              const tree = buildTree(Xtrain, ytrain, 0, 5, 5, 'regression');
-              const pred = Xtest.map(row=>predictTree(tree,row));
+              const model = fitDecisionTreeRegression(Xtrain, ytrain);
+              const pred = model.predict(Xtest);
               entry.metrics = regressionMetrics(ytest, pred);
               entry.pred = pred; entry.actual = ytest;
-            } else if(m.id==='logreg'){
-              const W = trainSoftmax(Xtrain, ytrain, numClasses);
-              const pred = predictSoftmax(W, Xtest);
+            } else if(m.id==='forest-reg'){
+              const model = fitRandomForestRegression(Xtrain, ytrain);
+              const pred = model.predict(Xtest);
+              entry.metrics = regressionMetrics(ytest, pred);
+              entry.pred = pred; entry.actual = ytest;
+            } else if(m.id==='forest-clf'){
+              const model = fitRandomForestClassifier(Xtrain, ytrain);
+              const pred = model.predict(Xtest);
               entry.metrics = classificationMetrics(ytest, pred, numClasses);
               entry.pred = pred; entry.actual = ytest; entry.classes = classes;
             } else if(m.id==='knn-clf'){
               const k = knnK(Xtrain.length);
-              const pred = knnPredictAll(Xtrain, ytrain, Xtest, k, 'classification', numClasses);
+              const model = fitKNNClassifier(Xtrain, ytrain, k);
+              const pred = model.predict(Xtest);
               entry.metrics = classificationMetrics(ytest, pred, numClasses);
               entry.pred = pred; entry.actual = ytest; entry.classes = classes; entry.k = k;
             } else if(m.id==='tree-clf'){
-              const tree = buildTree(Xtrain, ytrain, 0, 5, 5, 'classification', numClasses);
-              const pred = Xtest.map(row=>predictTree(tree,row));
+              const model = fitDecisionTreeClassifier(Xtrain, ytrain);
+              const pred = model.predict(Xtest);
               entry.metrics = classificationMetrics(ytest, pred, numClasses);
               entry.pred = pred; entry.actual = ytest; entry.classes = classes;
             } else if(m.id==='nb'){
-              const model = trainGNB(Xtrain, ytrain, numClasses);
-              const pred = Xtest.map(row=>predictGNB(model,row));
+              const model = fitNaiveBayes(Xtrain, ytrain);
+              const pred = model.predict(Xtest);
               entry.metrics = classificationMetrics(ytest, pred, numClasses);
               entry.pred = pred; entry.actual = ytest; entry.classes = classes;
             }
@@ -1216,11 +1047,6 @@ function renderResults(){
 
 function renderRegressionCard(e, idx){
   const m = e.metrics;
-  let coefHtml = '';
-  if(e.coef){
-    coefHtml = '<div class="chart-box small" style="margin-top:22px;"><canvas id="coefChart-'+idx+'"></canvas></div>'+
-      '<div class="confusion-legend">Coefficients are on standardized features, so magnitude reflects relative influence.</div>';
-  }
   return '<h3>'+e.name+'</h3>'+
     '<div class="card-sub">Trained in '+e.trainMs+' ms'+(e.k?' · k='+e.k:'')+'</div>'+
     '<div class="metric-strip">'+
@@ -1229,8 +1055,7 @@ function renderRegressionCard(e, idx){
       metricBox('MAE', formatNum(m.mae))+
       metricBox('MSE', formatNum(m.mse))+
     '</div>'+
-    '<div class="chart-box"><canvas id="scatterChart-'+idx+'"></canvas></div>'+
-    coefHtml;
+    '<div class="chart-box"><canvas id="scatterChart-'+idx+'"></canvas></div>';
 }
 
 function drawRegressionChart(e, idx){
@@ -1253,23 +1078,6 @@ function drawRegressionChart(e, idx){
       }
     }
   });
-  if(e.coef){
-    destroyChart('coefChart-'+idx);
-    const ctx2 = document.getElementById('coefChart-'+idx).getContext('2d');
-    const names = ['(bias)', ...e.featureMeta.map(f=>f.name)];
-    const vals = e.coef;
-    // sort by abs value, keep top 12 for readability
-    const paired = names.map((n,i)=>({n, v:vals[i]})).filter(p=>p.n!=='(bias)').sort((a,b)=>Math.abs(b.v)-Math.abs(a.v)).slice(0,12);
-    state.charts['coefChart-'+idx] = new Chart(ctx2,{
-      type:'bar',
-      data:{ labels:paired.map(p=>p.n), datasets:[{ data:paired.map(p=>p.v), backgroundColor: paired.map(p=>p.v>=0?'rgba(79,209,197,0.6)':'rgba(229,105,123,0.6)') }] },
-      options:{
-        indexAxis:'y', responsive:true, maintainAspectRatio:false,
-        plugins:{ legend:{display:false} },
-        scales:{ x:{grid:{color:'#2b2f39'}, ticks:{color:'#8b909c'}}, y:{grid:{display:false}, ticks:{color:'#8b909c', font:{size:10.5}}} }
-      }
-    });
-  }
 }
 
 function renderClassificationCard(e, idx, classes){
