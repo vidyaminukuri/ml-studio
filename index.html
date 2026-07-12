@@ -1,0 +1,1353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bench — a small lab for tabular data</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+  :root{
+    --bg:#14161a;
+    --panel:#1b1e24;
+    --panel-alt:#20242c;
+    --border:#2b2f39;
+    --text:#e7e5e0;
+    --text-dim:#8b909c;
+    --text-dimmer:#5c616d;
+    --accent:#4fd1c5;
+    --accent-dim:#2f5f5c;
+    --warm:#f2a65a;
+    --danger:#e5697b;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:'IBM Plex Sans', sans-serif;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,h4{
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:600;
+    margin:0 0 6px 0;
+    letter-spacing:-0.01em;
+  }
+  .mono{font-family:'IBM Plex Mono', monospace;}
+  a{color:var(--accent);}
+
+  .shell{
+    display:grid;
+    grid-template-columns:240px 1fr;
+    min-height:100vh;
+  }
+  @media (max-width:820px){
+    .shell{grid-template-columns:1fr;}
+    .sidebar{
+      display:flex;
+      flex-direction:row;
+      overflow-x:auto;
+      border-right:none;
+      border-bottom:1px solid var(--border);
+    }
+  }
+
+  .sidebar{
+    border-right:1px solid var(--border);
+    padding:28px 20px;
+    display:flex;
+    flex-direction:column;
+    gap:26px;
+    background:linear-gradient(180deg, var(--panel), var(--bg));
+  }
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-bottom:6px;
+  }
+  .brand-mark{
+    width:20px;height:20px;border-radius:4px;
+    background:conic-gradient(from 220deg, var(--accent), var(--warm), var(--accent));
+    box-shadow:0 0 0 1px var(--border);
+    flex-shrink:0;
+  }
+  .brand-name{font-family:'Space Grotesk';font-weight:700;font-size:15px;letter-spacing:0.02em;}
+  .brand-sub{color:var(--text-dimmer);font-size:11px;font-family:'IBM Plex Mono';margin-top:-2px;}
+
+  .steps{display:flex;flex-direction:column;gap:2px;}
+  .step{
+    display:flex;
+    align-items:flex-start;
+    gap:12px;
+    padding:12px 10px;
+    border-radius:8px;
+    cursor:default;
+    opacity:0.4;
+    transition:opacity .2s ease, background .2s ease;
+  }
+  .step.reachable{cursor:pointer;}
+  .step.active{opacity:1;background:var(--panel-alt);}
+  .step.done{opacity:0.85;}
+  .step-dot{
+    width:22px;height:22px;border-radius:50%;
+    border:1px solid var(--border);
+    display:flex;align-items:center;justify-content:center;
+    font-family:'IBM Plex Mono';font-size:10px;color:var(--text-dim);
+    flex-shrink:0;margin-top:1px;
+    background:var(--bg);
+  }
+  .step.active .step-dot{border-color:var(--accent);color:var(--accent);}
+  .step.done .step-dot{background:var(--accent);border-color:var(--accent);color:#0c1210;}
+  .step-label{font-size:13.5px;font-weight:500;}
+  .step-desc{font-size:11.5px;color:var(--text-dimmer);margin-top:1px;}
+
+  .sidebar-foot{margin-top:auto;font-size:11px;color:var(--text-dimmer);font-family:'IBM Plex Mono';line-height:1.6;}
+
+  .main{padding:36px 44px;max-width:1180px;}
+  @media (max-width:820px){.main{padding:22px 18px;}}
+
+  .panel{display:none;}
+  .panel.active{display:block;animation:rise .35s ease;}
+  @keyframes rise{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+
+  .eyebrow{
+    font-family:'IBM Plex Mono';font-size:11px;letter-spacing:0.12em;text-transform:uppercase;
+    color:var(--accent);margin-bottom:10px;
+  }
+  .lede{color:var(--text-dim);font-size:14.5px;max-width:640px;margin-bottom:28px;line-height:1.55;}
+
+  .dropzone{
+    border:1px dashed var(--border);
+    border-radius:var(--radius);
+    padding:44px 28px;
+    text-align:center;
+    background:var(--panel);
+    transition:border-color .2s ease, background .2s ease;
+    cursor:pointer;
+  }
+  .dropzone.drag{border-color:var(--accent);background:var(--panel-alt);}
+  .dropzone-title{font-size:15px;font-weight:500;margin-bottom:6px;}
+  .dropzone-sub{color:var(--text-dimmer);font-size:12.5px;}
+
+  .sample-row{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap;}
+
+  .btn{
+    font-family:'IBM Plex Sans';font-size:13px;font-weight:500;
+    padding:10px 16px;border-radius:7px;border:1px solid var(--border);
+    background:var(--panel-alt);color:var(--text);cursor:pointer;
+    transition:border-color .15s ease, background .15s ease, transform .1s ease;
+  }
+  .btn:hover{border-color:var(--text-dimmer);}
+  .btn:active{transform:translateY(1px);}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#0c1210;font-weight:600;}
+  .btn-primary:hover{background:#5fdccf;border-color:#5fdccf;}
+  .btn-primary:disabled{opacity:0.35;cursor:not-allowed;background:var(--accent);}
+  .btn-ghost{background:transparent;}
+  .btn-row{display:flex;gap:10px;margin-top:26px;align-items:center;}
+
+  .card{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:20px 22px;
+    margin-bottom:18px;
+  }
+  .card h3{font-size:14.5px;}
+  .card-sub{color:var(--text-dimmer);font-size:12px;margin-bottom:14px;}
+
+  .table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:8px;}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;}
+  th,td{
+    padding:7px 12px;text-align:left;white-space:nowrap;
+    border-bottom:1px solid var(--border);font-family:'IBM Plex Mono';
+  }
+  th{
+    color:var(--accent);font-weight:500;background:var(--panel-alt);
+    position:sticky;top:0;font-size:11px;text-transform:uppercase;letter-spacing:0.04em;
+  }
+  tr:last-child td{border-bottom:none;}
+  td.rownum, th.rownum{color:var(--text-dimmer);text-align:right;}
+
+  .col-chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;}
+  .col-chip{
+    font-family:'IBM Plex Mono';font-size:11px;padding:4px 9px;border-radius:5px;
+    border:1px solid var(--border);color:var(--text-dim);
+  }
+  .col-chip.num{color:var(--accent);border-color:var(--accent-dim);}
+  .col-chip.cat{color:var(--warm);border-color:#5c4a30;}
+
+  .field{margin-bottom:20px;}
+  .field label{display:block;font-size:12.5px;font-weight:500;margin-bottom:8px;color:var(--text);}
+  .field-hint{color:var(--text-dimmer);font-size:11.5px;margin-top:6px;}
+  select, input[type=range]{
+    font-family:'IBM Plex Mono';font-size:13px;
+    background:var(--panel-alt);color:var(--text);border:1px solid var(--border);
+    border-radius:6px;padding:9px 10px;width:100%;max-width:360px;
+  }
+  .radio-row{display:flex;gap:16px;}
+  .radio-opt{
+    display:flex;align-items:center;gap:7px;font-size:13px;cursor:pointer;
+    padding:9px 14px;border:1px solid var(--border);border-radius:7px;background:var(--panel-alt);
+  }
+  .radio-opt.checked{border-color:var(--accent);color:var(--accent);}
+  .radio-opt input{accent-color:var(--accent);}
+
+  .checkbox-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;}
+  .checkbox-item{
+    display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);
+    border-radius:7px;background:var(--panel-alt);font-size:12.5px;cursor:pointer;
+  }
+  .checkbox-item input{accent-color:var(--accent);}
+  .checkbox-item .type-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+  .type-dot.num{background:var(--accent);}
+  .type-dot.cat{background:var(--warm);}
+
+  .model-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;}
+  .model-item{
+    border:1px solid var(--border);border-radius:8px;padding:12px 14px;background:var(--panel-alt);
+    cursor:pointer;
+  }
+  .model-item.checked{border-color:var(--accent);}
+  .model-item-head{display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:500;}
+  .model-item input{accent-color:var(--accent);}
+  .model-item-desc{color:var(--text-dimmer);font-size:11.5px;margin-top:5px;line-height:1.4;}
+
+  .split-readout{font-family:'IBM Plex Mono';color:var(--accent);font-size:13px;margin-top:8px;}
+
+  .warn-note{
+    display:flex;gap:8px;align-items:flex-start;
+    background:rgba(242,166,90,0.08);border:1px solid #5c4a30;color:var(--warm);
+    padding:10px 12px;border-radius:7px;font-size:12px;margin-top:14px;
+  }
+
+  .status-line{
+    display:flex;align-items:center;gap:10px;color:var(--text-dim);font-size:12.5px;
+    font-family:'IBM Plex Mono';margin-top:16px;
+  }
+  .pulse{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 1s infinite ease-in-out;}
+  @keyframes pulse{0%,100%{opacity:0.3;}50%{opacity:1;}}
+
+  .compare-grid{display:grid;grid-template-columns:2fr 1fr;gap:18px;}
+  @media (max-width:960px){.compare-grid{grid-template-columns:1fr;}}
+
+  .metric-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin:14px 0 6px 0;}
+  .metric-box{border:1px solid var(--border);border-radius:8px;padding:12px;background:var(--panel-alt);}
+  .metric-box .m-label{font-size:10.5px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-dimmer);}
+  .metric-box .m-value{font-family:'IBM Plex Mono';font-size:19px;color:var(--accent);margin-top:4px;}
+
+  .chart-box{position:relative;height:230px;margin-top:10px;}
+  .chart-box.small{height:190px;}
+
+  .confusion-wrap{margin-top:12px;}
+  .confusion-cell{
+    text-align:center !important;font-family:'IBM Plex Mono';font-size:12px;
+    min-width:52px;
+  }
+  .confusion-legend{color:var(--text-dimmer);font-size:11px;margin-top:8px;}
+
+  .footer-actions{display:flex;gap:10px;margin:26px 0 60px 0;}
+
+  ::-webkit-scrollbar{height:8px;width:8px;}
+  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px;}
+
+  .empty-hint{color:var(--text-dimmer);font-size:13px;padding:40px 0;text-align:center;}
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <div class="sidebar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div>
+        <div class="brand-name">BENCH</div>
+        <div class="brand-sub">tabular model workbench</div>
+      </div>
+    </div>
+    <div class="steps">
+      <div class="step active reachable" data-step="1" onclick="goToStep(1)">
+        <div class="step-dot">01</div>
+        <div>
+          <div class="step-label">Load data</div>
+          <div class="step-desc">Upload a CSV or try a sample</div>
+        </div>
+      </div>
+      <div class="step" data-step="2" onclick="goToStep(2)">
+        <div class="step-dot">02</div>
+        <div>
+          <div class="step-label">Configure</div>
+          <div class="step-desc">Pick target, features, models</div>
+        </div>
+      </div>
+      <div class="step" data-step="3" onclick="goToStep(3)">
+        <div class="step-dot">03</div>
+        <div>
+          <div class="step-label">Results</div>
+          <div class="step-desc">Compare metrics side by side</div>
+        </div>
+      </div>
+    </div>
+    <div class="sidebar-foot">
+      All computation runs in your<br>browser. Nothing is uploaded.
+    </div>
+  </div>
+
+  <div class="main">
+
+    <!-- STEP 1: UPLOAD -->
+    <div class="panel active" id="panel-1">
+      <div class="eyebrow">Step 01</div>
+      <h1>Load a dataset</h1>
+      <p class="lede">Drop in a CSV file. Bench will read the columns, guess which ones are numeric or categorical, and get everything ready for the next step.</p>
+
+      <div class="dropzone" id="dropzone">
+        <div class="dropzone-title">Drag a .csv file here, or click to browse</div>
+        <div class="dropzone-sub">Header row required · comma or tab separated · runs entirely client-side</div>
+        <input type="file" id="fileInput" accept=".csv,.tsv,text/csv" style="display:none">
+      </div>
+
+      <div class="sample-row">
+        <button class="btn" onclick="loadSample('regression')">Try a sample: house prices (regression)</button>
+        <button class="btn" onclick="loadSample('classification')">Try a sample: seed varieties (classification)</button>
+      </div>
+
+      <div id="uploadStatus" class="status-line" style="display:none;"></div>
+
+      <div id="previewArea" style="margin-top:26px;"></div>
+
+      <div class="btn-row" id="step1Continue" style="display:none;">
+        <button class="btn btn-primary" onclick="goToStep(2)">Continue to configure →</button>
+      </div>
+    </div>
+
+    <!-- STEP 2: CONFIGURE -->
+    <div class="panel" id="panel-2">
+      <div class="eyebrow">Step 02</div>
+      <h1>Choose variables and models</h1>
+      <p class="lede">Pick the column you want to predict, the columns to predict it from, and which models to run. Bench trains all of them on the same split so you can compare fairly.</p>
+
+      <div class="card">
+        <h3>Target variable</h3>
+        <div class="card-sub">The column the models will learn to predict.</div>
+        <div class="field">
+          <select id="targetSelect" onchange="onTargetChange()"></select>
+        </div>
+        <div class="radio-row" id="problemTypeRow"></div>
+        <div class="field-hint" id="problemTypeHint"></div>
+      </div>
+
+      <div class="card">
+        <h3>Independent variables</h3>
+        <div class="card-sub">Columns used as inputs. Unchecked columns are ignored.</div>
+        <div class="checkbox-grid" id="featureChecklist"></div>
+        <div id="featureWarning"></div>
+      </div>
+
+      <div class="card">
+        <h3>Models to train</h3>
+        <div class="card-sub" id="modelSub">Select one or more. Options depend on the problem type above.</div>
+        <div class="model-grid" id="modelChecklist"></div>
+      </div>
+
+      <div class="card">
+        <h3>Train / test split</h3>
+        <div class="card-sub">How much data is held out to score the models on unseen rows.</div>
+        <input type="range" id="splitSlider" min="50" max="90" value="80" oninput="updateSplitReadout()">
+        <div class="split-readout" id="splitReadout">80% train · 20% test</div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-ghost" onclick="goToStep(1)">← back</button>
+        <button class="btn btn-primary" id="runBtn" onclick="runTraining()">Run models</button>
+      </div>
+      <div class="status-line" id="trainStatus" style="display:none;">
+        <div class="pulse"></div><span id="trainStatusText">Training…</span>
+      </div>
+    </div>
+
+    <!-- STEP 3: RESULTS -->
+    <div class="panel" id="panel-3">
+      <div class="eyebrow">Step 03</div>
+      <h1>Results</h1>
+      <p class="lede" id="resultsLede"></p>
+
+      <div class="card">
+        <h3>Model comparison</h3>
+        <div class="card-sub" id="comparisonSub"></div>
+        <div class="chart-box"><canvas id="comparisonChart"></canvas></div>
+      </div>
+
+      <div id="modelCards"></div>
+
+      <div class="footer-actions">
+        <button class="btn" onclick="downloadSummaryCSV()">Download metrics as CSV</button>
+        <button class="btn btn-ghost" onclick="goToStep(2)">← adjust configuration</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+/* =========================================================================
+   STATE
+   ========================================================================= */
+const state = {
+  headers: [],
+  rows: [],
+  colInfo: {},          // header -> {type:'numeric'|'categorical', unique, uniqueValues, missing}
+  target: null,
+  features: [],
+  problemType: 'regression', // 'regression' | 'classification'
+  problemTypeAuto: 'regression',
+  selectedModels: new Set(),
+  testSplitPct: 80,
+  results: null,
+  charts: {}            // id -> Chart instance, so we can destroy before re-render
+};
+
+const REGRESSION_MODELS = [
+  {id:'linreg', name:'Linear Regression', desc:'Closed-form least squares with light ridge regularization.'},
+  {id:'knn-reg', name:'K-Nearest Neighbors', desc:'Predicts by averaging the closest training rows.'},
+  {id:'tree-reg', name:'Decision Tree', desc:'Splits data into regions minimizing variance.'}
+];
+const CLASSIFICATION_MODELS = [
+  {id:'logreg', name:'Logistic Regression', desc:'Softmax regression trained with gradient descent.'},
+  {id:'knn-clf', name:'K-Nearest Neighbors', desc:'Classifies by majority vote among nearest rows.'},
+  {id:'tree-clf', name:'Decision Tree', desc:'Splits data into regions minimizing class impurity.'},
+  {id:'nb', name:'Gaussian Naive Bayes', desc:'Assumes features are normally distributed per class.'}
+];
+
+/* =========================================================================
+   NAVIGATION
+   ========================================================================= */
+function goToStep(n){
+  if(n===2 && state.rows.length===0) return;
+  if(n===3 && !state.results) return;
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('panel-'+n).classList.add('active');
+  document.querySelectorAll('.step').forEach(s=>{
+    const sn = parseInt(s.dataset.step,10);
+    s.classList.remove('active','done','reachable');
+    if(sn===n) s.classList.add('active');
+    if(sn<n) s.classList.add('done');
+    if(sn===1 || (sn===2 && state.rows.length>0) || (sn===3 && state.results)) s.classList.add('reachable');
+  });
+  if(n===2) renderConfigStep();
+}
+
+/* =========================================================================
+   FILE HANDLING
+   ========================================================================= */
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+dropzone.addEventListener('click', ()=>fileInput.click());
+dropzone.addEventListener('dragover', e=>{e.preventDefault(); dropzone.classList.add('drag');});
+dropzone.addEventListener('dragleave', ()=>dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e=>{
+  e.preventDefault(); dropzone.classList.remove('drag');
+  if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e=>{
+  if(e.target.files.length) handleFile(e.target.files[0]);
+});
+
+function setUploadStatus(msg, ok){
+  const el = document.getElementById('uploadStatus');
+  el.style.display = 'flex';
+  el.innerHTML = (ok?'<div class="pulse" style="animation:none;background:var(--accent);"></div>':'<div class="pulse" style="animation:none;background:var(--danger);"></div>') + '<span>'+msg+'</span>';
+}
+
+function handleFile(file){
+  Papa.parse(file, {
+    header:true,
+    skipEmptyLines:true,
+    complete: res=>{
+      if(!res.data.length){ setUploadStatus('That file looks empty.', false); return; }
+      ingestData(res.meta.fields, res.data, file.name);
+    },
+    error: err=>{ setUploadStatus('Could not parse that file: '+err.message, false); }
+  });
+}
+
+function ingestData(headers, rows, label){
+  state.headers = headers.filter(h=>h && h.trim()!=='');
+  state.rows = rows;
+  state.colInfo = inferColumnTypes(state.headers, rows);
+  state.target = null;
+  state.features = [];
+  state.results = null;
+  setUploadStatus('Loaded '+label+' — '+rows.length+' rows, '+state.headers.length+' columns.', true);
+  renderPreview();
+  document.getElementById('step1Continue').style.display = 'flex';
+}
+
+function inferColumnTypes(headers, rows){
+  const info = {};
+  headers.forEach(h=>{
+    const values = rows.map(r=>r[h]).filter(v=>v!==undefined && v!==null && String(v).trim()!=='');
+    const missing = rows.length - values.length;
+    const isNumeric = values.length>0 && values.every(v=>!isNaN(Number(String(v).trim())) && String(v).trim()!=='');
+    if(isNumeric){
+      const nums = values.map(v=>Number(v));
+      const uniqueVals = Array.from(new Set(nums));
+      const allInts = nums.every(v=>Number.isInteger(v));
+      info[h] = {type:'numeric', unique:uniqueVals.length, allInts, missing, sample:nums.slice(0,5)};
+    } else {
+      const uniqueVals = Array.from(new Set(values.map(v=>String(v).trim()))).sort();
+      info[h] = {type:'categorical', unique:uniqueVals.length, uniqueValues:uniqueVals, missing, sample:values.slice(0,5)};
+    }
+  });
+  return info;
+}
+
+/* Built-in sample datasets so the app can be exercised without a file */
+function loadSample(kind){
+  if(kind==='regression'){
+    const rows=[]; let seed=42;
+    function rnd(){ seed = (seed*9301+49297)%233280; return seed/233280; }
+    for(let i=0;i<220;i++){
+      const size = Math.round(500 + rnd()*2500);
+      const bedrooms = Math.max(1, Math.round(1+size/900 + (rnd()-0.5)*1.2));
+      const age = Math.round(rnd()*60);
+      const neighborhood = ['Riverside','Uptown','Old Mill','Foxglen'][Math.floor(rnd()*4)];
+      const distCenter = +(rnd()*18).toFixed(1);
+      const basePrice = 40000 + size*140 + bedrooms*9000 - age*650 - distCenter*3200
+        + (neighborhood==='Uptown'?45000:neighborhood==='Riverside'?20000:neighborhood==='Old Mill'?-8000:0);
+      const price = Math.max(30000, Math.round(basePrice + (rnd()-0.5)*40000));
+      rows.push({size_sqft:size, bedrooms, age_years:age, neighborhood, distance_to_center_km:distCenter, price});
+    }
+    ingestData(Object.keys(rows[0]), rows, 'sample-house-prices.csv');
+  } else {
+    const rows=[]; let seed=7;
+    function rnd(){ seed = (seed*9301+49297)%233280; return seed/233280; }
+    const varieties = [
+      {name:'Kama', lenM:5.6, widM:3.2, kernelM:5.0, grooveM:5.1},
+      {name:'Rosa', lenM:6.2, widM:3.7, kernelM:5.7, grooveM:6.0},
+      {name:'Canadian', lenM:5.2, widM:2.9, kernelM:4.8, grooveM:5.0}
+    ];
+    varieties.forEach(v=>{
+      for(let i=0;i<80;i++){
+        const area = +(v.lenM*v.widM*0.6 + (rnd()-0.5)*1.5).toFixed(2);
+        const perimeter = +(area*0.72 + (rnd()-0.5)*0.8).toFixed(2);
+        const length = +(v.lenM + (rnd()-0.5)*0.6).toFixed(2);
+        const width = +(v.widM + (rnd()-0.5)*0.4).toFixed(2);
+        const kernelLength = +(v.kernelM + (rnd()-0.5)*0.5).toFixed(2);
+        const grooveLength = +(v.grooveM + (rnd()-0.5)*0.5).toFixed(2);
+        rows.push({area, perimeter, length, width, kernel_length:kernelLength, groove_length:grooveLength, variety:v.name});
+      }
+    });
+    ingestData(Object.keys(rows[0]), rows, 'sample-seed-varieties.csv');
+  }
+}
+
+function renderPreview(){
+  const wrap = document.getElementById('previewArea');
+  const headRow = state.headers.map(h=>'<th>'+escapeHtml(h)+'</th>').join('');
+  const bodyRows = state.rows.slice(0,8).map((r,i)=>{
+    return '<tr><td class="rownum">'+(i+1)+'</td>'+state.headers.map(h=>'<td>'+escapeHtml(String(r[h]??''))+'</td>').join('')+'</tr>';
+  }).join('');
+  const chips = state.headers.map(h=>{
+    const info = state.colInfo[h];
+    const cls = info.type==='numeric'?'num':'cat';
+    const detail = info.type==='numeric' ? (info.unique+' distinct') : (info.unique+' categories');
+    return '<div class="col-chip '+cls+'">'+escapeHtml(h)+' · '+detail+(info.missing?' · '+info.missing+' missing':'')+'</div>';
+  }).join('');
+  wrap.innerHTML =
+    '<h3 style="font-size:13px;color:var(--text-dim);font-weight:500;margin-bottom:10px;">Preview (first 8 rows)</h3>'+
+    '<div class="table-wrap"><table><thead><tr><th class="rownum">#</th>'+headRow+'</tr></thead><tbody>'+bodyRows+'</tbody></table></div>'+
+    '<div class="col-chip-row">'+chips+'</div>';
+}
+
+function escapeHtml(s){
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* =========================================================================
+   STEP 2: CONFIGURATION UI
+   ========================================================================= */
+function renderConfigStep(){
+  const targetSelect = document.getElementById('targetSelect');
+  targetSelect.innerHTML = state.headers.map(h=>'<option value="'+escapeHtml(h)+'">'+escapeHtml(h)+'</option>').join('');
+  if(!state.target) state.target = state.headers[state.headers.length-1];
+  targetSelect.value = state.target;
+  onTargetChange();
+}
+
+function onTargetChange(){
+  state.target = document.getElementById('targetSelect').value;
+  const info = state.colInfo[state.target];
+
+  // auto-detect problem type
+  if(info.type==='categorical'){
+    state.problemTypeAuto = 'classification';
+  } else {
+    state.problemTypeAuto = (info.allInts && info.unique<=10) ? 'classification' : 'regression';
+  }
+  if(!state._userSetProblemType) state.problemType = state.problemTypeAuto;
+
+  renderProblemTypeRow();
+  renderFeatureChecklist();
+  renderModelChecklist();
+}
+
+function renderProblemTypeRow(){
+  const row = document.getElementById('problemTypeRow');
+  const info = state.colInfo[state.target];
+  row.innerHTML = ['regression','classification'].map(pt=>{
+    const checked = state.problemType===pt;
+    return '<label class="radio-opt'+(checked?' checked':'')+'"><input type="radio" name="ptype" value="'+pt+'" '+(checked?'checked':'')+' onchange="setProblemType(\''+pt+'\')"> '+
+      (pt==='regression'?'Regression':'Classification')+'</label>';
+  }).join('');
+  const hint = document.getElementById('problemTypeHint');
+  const suggestion = state.problemTypeAuto===state.problemType ? 'suggested automatically' : 'overriding the automatic suggestion ('+state.problemTypeAuto+')';
+  hint.textContent = '"'+state.target+'" looks '+(info.type==='numeric'?'numeric':'categorical')+' with '+info.unique+' distinct value(s) — '+suggestion+'.';
+}
+
+function setProblemType(pt){
+  state.problemType = pt;
+  state._userSetProblemType = true;
+  renderProblemTypeRow();
+  renderModelChecklist();
+}
+
+function renderFeatureChecklist(){
+  const grid = document.getElementById('featureChecklist');
+  const candidates = state.headers.filter(h=>h!==state.target);
+  if(state.features.length===0){
+    state.features = candidates.slice();
+  } else {
+    state.features = state.features.filter(f=>candidates.includes(f));
+  }
+  grid.innerHTML = candidates.map(h=>{
+    const info = state.colInfo[h];
+    const checked = state.features.includes(h);
+    const dotClass = info.type==='numeric'?'num':'cat';
+    return '<label class="checkbox-item"><input type="checkbox" value="'+escapeHtml(h)+'" '+(checked?'checked':'')+' onchange="toggleFeature(\''+h.replace(/'/g,"\\'")+'\')">'+
+      '<span class="type-dot '+dotClass+'"></span>'+escapeHtml(h)+'</label>';
+  }).join('');
+
+  const warnEl = document.getElementById('featureWarning');
+  const highCard = candidates.filter(h=>state.colInfo[h].type==='categorical' && state.colInfo[h].unique>15 && state.features.includes(h));
+  if(highCard.length){
+    warnEl.innerHTML = '<div class="warn-note">⚠ '+highCard.join(', ')+' — '+(highCard.length>1?'these have':'this has')+' many distinct categories. Bench will use frequency encoding instead of one-hot columns to keep things fast.</div>';
+  } else {
+    warnEl.innerHTML = '';
+  }
+}
+
+function toggleFeature(h){
+  if(state.features.includes(h)) state.features = state.features.filter(f=>f!==h);
+  else state.features.push(h);
+  renderFeatureChecklist();
+}
+
+function renderModelChecklist(){
+  const grid = document.getElementById('modelChecklist');
+  const list = state.problemType==='regression' ? REGRESSION_MODELS : CLASSIFICATION_MODELS;
+  const validIds = new Set(list.map(m=>m.id));
+  // reset selection to defaults for this problem type if nothing valid selected
+  const anyValidSelected = Array.from(state.selectedModels).some(id=>validIds.has(id));
+  if(!anyValidSelected){
+    state.selectedModels = new Set(list.map(m=>m.id));
+  }
+  grid.innerHTML = list.map(m=>{
+    const checked = state.selectedModels.has(m.id);
+    return '<label class="model-item'+(checked?' checked':'')+'" onclick="event.stopPropagation();">'+
+      '<div class="model-item-head"><span>'+m.name+'</span><input type="checkbox" '+(checked?'checked':'')+' onchange="toggleModel(\''+m.id+'\')"></div>'+
+      '<div class="model-item-desc">'+m.desc+'</div></label>';
+  }).join('');
+  document.getElementById('modelSub').textContent = 'Options shown are for '+(state.problemType==='regression'?'regression':'classification')+' targets.';
+}
+
+function toggleModel(id){
+  if(state.selectedModels.has(id)) state.selectedModels.delete(id);
+  else state.selectedModels.add(id);
+  renderModelChecklist();
+}
+
+function updateSplitReadout(){
+  const v = parseInt(document.getElementById('splitSlider').value,10);
+  state.testSplitPct = v;
+  document.getElementById('splitReadout').textContent = v+'% train · '+(100-v)+'% test';
+}
+
+/* =========================================================================
+   MATRIX UTILITIES
+   ========================================================================= */
+function zerosMat(r,c){ const m=new Array(r); for(let i=0;i<r;i++){ m[i]=new Array(c).fill(0);} return m; }
+function transpose(A){ const r=A.length, c=A[0].length; const T=zerosMat(c,r); for(let i=0;i<r;i++) for(let j=0;j<c;j++) T[j][i]=A[i][j]; return T; }
+function matmul(A,B){
+  const r=A.length, k=A[0].length, c=B[0].length;
+  const C=zerosMat(r,c);
+  for(let i=0;i<r;i++){
+    for(let p=0;p<k;p++){
+      const a=A[i][p];
+      if(a===0) continue;
+      const rowB=B[p];
+      for(let j=0;j<c;j++) C[i][j]+=a*rowB[j];
+    }
+  }
+  return C;
+}
+function identity(n,scale=1){ const I=zerosMat(n,n); for(let i=0;i<n;i++) I[i][i]=scale; return I; }
+function addMat(A,B){ return A.map((row,i)=>row.map((v,j)=>v+B[i][j])); }
+function addBiasColumn(X){ return X.map(row=>[1,...row]); }
+function inverse(A){
+  const n=A.length;
+  const M=A.map((row,i)=>[...row, ...identity(n)[i]]);
+  for(let col=0; col<n; col++){
+    let pivotRow=col, best=Math.abs(M[col][col]);
+    for(let r=col+1;r<n;r++){ if(Math.abs(M[r][col])>best){best=Math.abs(M[r][col]); pivotRow=r;} }
+    if(best<1e-10){ M[col][col]+= (M[col][col]>=0?1e-6:-1e-6); }
+    else if(pivotRow!==col){ const tmp=M[col]; M[col]=M[pivotRow]; M[pivotRow]=tmp; }
+    const pivot=M[col][col];
+    for(let j=0;j<2*n;j++) M[col][j]/=pivot;
+    for(let r=0;r<n;r++){
+      if(r===col) continue;
+      const factor=M[r][col];
+      if(factor===0) continue;
+      for(let j=0;j<2*n;j++) M[r][j]-=factor*M[col][j];
+    }
+  }
+  return M.map(row=>row.slice(n));
+}
+
+/* =========================================================================
+   FEATURE ENCODING / PREPROCESSING
+   ========================================================================= */
+function buildEncodedMatrix(){
+  const featureMeta = []; // {name, kind:'numeric'|'onehot'|'freq', header, category?}
+  const freqMaps = {};
+  state.features.forEach(h=>{
+    const info = state.colInfo[h];
+    if(info.type==='numeric'){
+      featureMeta.push({name:h, kind:'numeric', header:h});
+    } else if(info.unique<=15){
+      info.uniqueValues.forEach(cat=>{
+        featureMeta.push({name:h+'='+cat, kind:'onehot', header:h, category:cat});
+      });
+    } else {
+      const counts = {};
+      state.rows.forEach(r=>{ const v=String(r[h]??'').trim(); if(v!=='') counts[v]=(counts[v]||0)+1; });
+      freqMaps[h]=counts;
+      featureMeta.push({name:h+' (freq-encoded)', kind:'freq', header:h});
+    }
+  });
+
+  const targetInfo = state.colInfo[state.target];
+  let classes = null;
+  if(state.problemType==='classification'){
+    classes = targetInfo.type==='categorical'
+      ? targetInfo.uniqueValues.slice()
+      : Array.from(new Set(state.rows.map(r=>r[state.target]).filter(v=>v!==undefined && v!==null && String(v).trim()!=='').map(v=>String(Number(v))))).sort((a,b)=>Number(a)-Number(b));
+  }
+
+  const X = [];
+  const y = [];
+  state.rows.forEach(r=>{
+    const rawTarget = r[state.target];
+    if(rawTarget===undefined || rawTarget===null || String(rawTarget).trim()==='') return; // drop rows missing target
+    const featRow = featureMeta.map(fm=>{
+      if(fm.kind==='numeric'){
+        const v = r[fm.header];
+        if(v===undefined || v===null || String(v).trim()==='') return NaN;
+        return Number(v);
+      } else if(fm.kind==='onehot'){
+        const v = r[fm.header];
+        return (v!==undefined && String(v).trim()===fm.category) ? 1 : 0;
+      } else {
+        const v = r[fm.header];
+        if(v===undefined || v===null || String(v).trim()==='') return NaN;
+        return freqMaps[fm.header][String(v).trim()] || 0;
+      }
+    });
+    X.push(featRow);
+    if(state.problemType==='regression'){
+      y.push(Number(rawTarget));
+    } else {
+      const label = targetInfo.type==='categorical' ? String(rawTarget).trim() : String(Number(rawTarget));
+      y.push(classes.indexOf(label));
+    }
+  });
+
+  return {X, y, featureMeta, classes};
+}
+
+function trainTestSplit(n, trainPct){
+  const idx = Array.from({length:n}, (_,i)=>i);
+  for(let i=idx.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [idx[i],idx[j]]=[idx[j],idx[i]]; }
+  const nTrain = Math.max(2, Math.round(n*trainPct/100));
+  return {trainIdx: idx.slice(0,nTrain), testIdx: idx.slice(nTrain)};
+}
+function pick(arr, idxs){ return idxs.map(i=>arr[i]); }
+
+function computeImputeStats(X){
+  const p = X[0].length;
+  const means = new Array(p).fill(0);
+  for(let j=0;j<p;j++){
+    let sum=0, cnt=0;
+    for(let i=0;i<X.length;i++){ const v=X[i][j]; if(!isNaN(v)){ sum+=v; cnt++; } }
+    means[j] = cnt>0 ? sum/cnt : 0;
+  }
+  return means;
+}
+function applyImpute(X, means){
+  return X.map(row=>row.map((v,j)=> isNaN(v) ? means[j] : v));
+}
+function computeStandardizeStats(X){
+  const p=X[0].length;
+  const means=new Array(p).fill(0), stds=new Array(p).fill(1);
+  for(let j=0;j<p;j++){
+    let sum=0; for(let i=0;i<X.length;i++) sum+=X[i][j];
+    const mean=sum/X.length;
+    let ss=0; for(let i=0;i<X.length;i++) ss+=(X[i][j]-mean)**2;
+    const std=Math.sqrt(ss/X.length);
+    means[j]=mean; stds[j]= std<1e-8 ? 1 : std;
+  }
+  return {means, stds};
+}
+function applyStandardize(X, means, stds){
+  return X.map(row=>row.map((v,j)=>(v-means[j])/stds[j]));
+}
+
+/* =========================================================================
+   MODELS
+   ========================================================================= */
+
+// ---- Linear Regression (ridge, closed form) ----
+function trainLinearRegression(X, y, lambda=0.15){
+  const Xb = addBiasColumn(X);
+  const Xt = transpose(Xb);
+  const XtX = matmul(Xt, Xb);
+  const reg = identity(XtX.length, lambda);
+  reg[0][0]=0;
+  const XtXreg = addMat(XtX, reg);
+  const Y = y.map(v=>[v]);
+  const XtY = matmul(Xt, Y);
+  const coefMat = matmul(inverse(XtXreg), XtY);
+  return coefMat.map(r=>r[0]);
+}
+function predictLinearRegression(coef, X){
+  return X.map(row=>{
+    let s=coef[0];
+    for(let j=0;j<row.length;j++) s+=coef[j+1]*row[j];
+    return s;
+  });
+}
+
+// ---- Softmax (multinomial logistic) Regression ----
+function trainSoftmax(X, yIdx, k, lr=0.2, iters=350, lambda=0.02){
+  const n=X.length, p=X[0].length;
+  const Xb = addBiasColumn(X);
+  const pb = p+1;
+  let W = zerosMat(pb, k);
+  const Yoh = zerosMat(n, k);
+  for(let i=0;i<n;i++) Yoh[i][yIdx[i]]=1;
+  for(let it=0; it<iters; it++){
+    const logits = matmul(Xb, W); // n x k
+    const probs = logits.map(row=>softmax(row));
+    const diff = probs.map((row,i)=>row.map((v,j)=>v-Yoh[i][j])); // n x k
+    const grad = matmul(transpose(Xb), diff); // pb x k
+    for(let a=0;a<pb;a++){
+      for(let b=0;b<k;b++){
+        let g = grad[a][b]/n;
+        if(a!==0) g += lambda*W[a][b];
+        W[a][b] -= lr*g;
+      }
+    }
+  }
+  return W;
+}
+function softmax(row){
+  const m = Math.max(...row);
+  const exps = row.map(v=>Math.exp(v-m));
+  const sum = exps.reduce((a,b)=>a+b,0);
+  return exps.map(v=>v/sum);
+}
+function predictSoftmax(W, X){
+  const Xb = addBiasColumn(X);
+  const logits = matmul(Xb, W);
+  return logits.map(row=>{
+    const probs = softmax(row);
+    let best=0; for(let j=1;j<probs.length;j++) if(probs[j]>probs[best]) best=j;
+    return best;
+  });
+}
+
+// ---- K-Nearest Neighbors ----
+function knnK(nTrain){ let k=Math.round(Math.sqrt(nTrain)); k=Math.max(3,Math.min(15,k)); if(k%2===0) k+=1; return k; }
+function knnPredictAll(Xtrain, ytrain, Xtest, k, mode, numClasses){
+  return Xtest.map(xt=>{
+    const dists = Xtrain.map((xr,i)=>{
+      let s=0; for(let j=0;j<xr.length;j++){ const d=xr[j]-xt[j]; s+=d*d; }
+      return {d:s, i};
+    });
+    dists.sort((a,b)=>a.d-b.d);
+    const nn = dists.slice(0,k);
+    if(mode==='regression'){
+      let sum=0; nn.forEach(o=>sum+=ytrain[o.i]);
+      return sum/nn.length;
+    } else {
+      const counts = new Array(numClasses).fill(0);
+      nn.forEach(o=>counts[ytrain[o.i]]++);
+      let best=0; for(let c=1;c<numClasses;c++) if(counts[c]>counts[best]) best=c;
+      return best;
+    }
+  });
+}
+
+// ---- Decision Tree (CART) ----
+function buildTree(X, y, depth, maxDepth, minLeaf, mode, numClasses){
+  const n=X.length;
+  const isPure = mode==='classification' && y.every(v=>v===y[0]);
+  if(depth>=maxDepth || n<=minLeaf*2 || isPure){
+    return leafNode(y, mode, numClasses);
+  }
+  const p = X[0].length;
+  let best=null;
+  for(let j=0;j<p;j++){
+    const vals = Array.from(new Set(X.map(r=>r[j]))).sort((a,b)=>a-b);
+    if(vals.length<2) continue;
+    const numCandidates = Math.min(vals.length-1, 20);
+    const step = Math.max(1, Math.floor((vals.length-1)/numCandidates));
+    for(let vi=0; vi<vals.length-1; vi+=step){
+      const threshold = (vals[vi]+vals[vi+1])/2;
+      const leftIdx=[], rightIdx=[];
+      for(let i=0;i<n;i++){ if(X[i][j]<=threshold) leftIdx.push(i); else rightIdx.push(i); }
+      if(leftIdx.length<minLeaf || rightIdx.length<minLeaf) continue;
+      const score = mode==='regression'
+        ? weightedVariance(leftIdx.map(i=>y[i]), rightIdx.map(i=>y[i]))
+        : weightedGini(leftIdx.map(i=>y[i]), rightIdx.map(i=>y[i]), numClasses);
+      if(!best || score<best.score){
+        best = {score, feature:j, threshold, leftIdx, rightIdx};
+      }
+    }
+  }
+  if(!best) return leafNode(y, mode, numClasses);
+  const leftX = best.leftIdx.map(i=>X[i]), leftY = best.leftIdx.map(i=>y[i]);
+  const rightX = best.rightIdx.map(i=>X[i]), rightY = best.rightIdx.map(i=>y[i]);
+  return {
+    leaf:false, feature:best.feature, threshold:best.threshold,
+    left: buildTree(leftX, leftY, depth+1, maxDepth, minLeaf, mode, numClasses),
+    right: buildTree(rightX, rightY, depth+1, maxDepth, minLeaf, mode, numClasses)
+  };
+}
+function leafNode(y, mode, numClasses){
+  if(mode==='regression'){
+    const mean = y.reduce((a,b)=>a+b,0)/y.length;
+    return {leaf:true, value:mean};
+  } else {
+    const counts = new Array(numClasses).fill(0);
+    y.forEach(v=>counts[v]++);
+    let best=0; for(let c=1;c<numClasses;c++) if(counts[c]>counts[best]) best=c;
+    return {leaf:true, value:best};
+  }
+}
+function variance(arr){
+  if(arr.length===0) return 0;
+  const mean=arr.reduce((a,b)=>a+b,0)/arr.length;
+  return arr.reduce((s,v)=>s+(v-mean)**2,0)/arr.length;
+}
+function weightedVariance(left,right){
+  const n=left.length+right.length;
+  return (left.length/n)*variance(left) + (right.length/n)*variance(right);
+}
+function gini(arr, numClasses){
+  if(arr.length===0) return 0;
+  const counts=new Array(numClasses).fill(0);
+  arr.forEach(v=>counts[v]++);
+  let s=0; counts.forEach(c=>{ const p=c/arr.length; s+=p*p; });
+  return 1-s;
+}
+function weightedGini(left,right,numClasses){
+  const n=left.length+right.length;
+  return (left.length/n)*gini(left,numClasses) + (right.length/n)*gini(right,numClasses);
+}
+function predictTree(tree, x){
+  let node=tree;
+  while(!node.leaf){ node = (x[node.feature]<=node.threshold) ? node.left : node.right; }
+  return node.value;
+}
+
+// ---- Gaussian Naive Bayes ----
+function trainGNB(X, yIdx, numClasses){
+  const p = X[0].length;
+  const model = {priors:new Array(numClasses).fill(0), means:[], vars:[]};
+  for(let c=0;c<numClasses;c++){
+    const rows = X.filter((_,i)=>yIdx[i]===c);
+    model.priors[c] = rows.length / X.length;
+    const means=new Array(p).fill(0), vars=new Array(p).fill(1e-3);
+    for(let j=0;j<p;j++){
+      let sum=0; rows.forEach(r=>sum+=r[j]);
+      const mean = rows.length? sum/rows.length : 0;
+      let ss=0; rows.forEach(r=>ss+=(r[j]-mean)**2);
+      means[j]=mean; vars[j]=Math.max(1e-3, rows.length? ss/rows.length : 1e-3);
+    }
+    model.means.push(means); model.vars.push(vars);
+  }
+  return model;
+}
+function predictGNB(model, x){
+  const numClasses = model.priors.length;
+  let best=0, bestScore=-Infinity;
+  for(let c=0;c<numClasses;c++){
+    let score = Math.log(model.priors[c]+1e-12);
+    for(let j=0;j<x.length;j++){
+      const mean=model.means[c][j], v=model.vars[c][j];
+      score += -0.5*Math.log(2*Math.PI*v) - ((x[j]-mean)**2)/(2*v);
+    }
+    if(score>bestScore){ bestScore=score; best=c; }
+  }
+  return best;
+}
+
+/* =========================================================================
+   METRICS
+   ========================================================================= */
+function regressionMetrics(yTrue, yPred){
+  const n=yTrue.length;
+  const meanY = yTrue.reduce((a,b)=>a+b,0)/n;
+  let sse=0, sst=0, sae=0;
+  for(let i=0;i<n;i++){ sse+=(yTrue[i]-yPred[i])**2; sst+=(yTrue[i]-meanY)**2; sae+=Math.abs(yTrue[i]-yPred[i]); }
+  const mse = sse/n;
+  return { r2: sst>1e-12 ? 1-sse/sst : 0, mse, rmse: Math.sqrt(mse), mae: sae/n };
+}
+function classificationMetrics(yTrue, yPred, numClasses){
+  const cm = zerosMat(numClasses, numClasses);
+  for(let i=0;i<yTrue.length;i++) cm[yTrue[i]][yPred[i]]++;
+  let correct=0; for(let c=0;c<numClasses;c++) correct+=cm[c][c];
+  const accuracy = correct/yTrue.length;
+  let precisions=[], recalls=[], f1s=[];
+  for(let c=0;c<numClasses;c++){
+    let tp=cm[c][c], fp=0, fn=0;
+    for(let r=0;r<numClasses;r++){ if(r!==c) fn+=cm[c][r]; }
+    for(let r=0;r<numClasses;r++){ if(r!==c) fp+=cm[r][c]; }
+    const precision = (tp+fp)>0 ? tp/(tp+fp) : 0;
+    const recall = (tp+fn)>0 ? tp/(tp+fn) : 0;
+    const f1 = (precision+recall)>0 ? 2*precision*recall/(precision+recall) : 0;
+    precisions.push(precision); recalls.push(recall); f1s.push(f1);
+  }
+  const avg = arr=>arr.reduce((a,b)=>a+b,0)/arr.length;
+  return { accuracy, precision: avg(precisions), recall: avg(recalls), f1: avg(f1s), confusionMatrix: cm };
+}
+
+/* =========================================================================
+   TRAINING ORCHESTRATION
+   ========================================================================= */
+function runTraining(){
+  if(state.features.length===0){ alert('Choose at least one independent variable.'); return; }
+  if(state.selectedModels.size===0){ alert('Choose at least one model to train.'); return; }
+  if(typeof Chart==='undefined'){ alert('The charting library failed to load from its CDN, so results can\'t be drawn yet. Check your network/ad-blocker settings and reload the page.'); return; }
+
+  document.getElementById('trainStatus').style.display='flex';
+  document.getElementById('runBtn').disabled=true;
+  document.getElementById('trainStatusText').textContent='Encoding data…';
+
+  setTimeout(()=>{
+    try{
+      const {X, y, featureMeta, classes} = buildEncodedMatrix();
+      if(X.length<10){ alert('Not enough rows with a valid target value to train on ('+X.length+' found). Need at least 10.'); resetTrainButton(); return; }
+
+      const {trainIdx, testIdx} = trainTestSplit(X.length, state.testSplitPct);
+      if(testIdx.length<3){ alert('Test split too small — lower the train percentage.'); resetTrainButton(); return; }
+
+      let Xtrain = pick(X, trainIdx), Xtest = pick(X, testIdx);
+      const ytrain = pick(y, trainIdx), ytest = pick(y, testIdx);
+
+      const means = computeImputeStats(Xtrain);
+      Xtrain = applyImpute(Xtrain, means);
+      Xtest = applyImpute(Xtest, means);
+
+      const stdStats = computeStandardizeStats(Xtrain);
+      Xtrain = applyStandardize(Xtrain, stdStats.means, stdStats.stds);
+      Xtest = applyStandardize(Xtest, stdStats.means, stdStats.stds);
+
+      document.getElementById('trainStatusText').textContent='Training models…';
+
+      setTimeout(()=>{
+        const results = [];
+        const numClasses = classes ? classes.length : 0;
+        const modelList = state.problemType==='regression' ? REGRESSION_MODELS : CLASSIFICATION_MODELS;
+
+        modelList.forEach(m=>{
+          if(!state.selectedModels.has(m.id)) return;
+          const t0 = performance.now();
+          let entry = {id:m.id, name:m.name};
+          try{
+            if(m.id==='linreg'){
+              const coef = trainLinearRegression(Xtrain, ytrain);
+              const pred = predictLinearRegression(coef, Xtest);
+              entry.metrics = regressionMetrics(ytest, pred);
+              entry.pred = pred; entry.actual = ytest;
+              entry.coef = coef; entry.featureMeta = featureMeta;
+            } else if(m.id==='knn-reg'){
+              const k = knnK(Xtrain.length);
+              const pred = knnPredictAll(Xtrain, ytrain, Xtest, k, 'regression');
+              entry.metrics = regressionMetrics(ytest, pred);
+              entry.pred = pred; entry.actual = ytest; entry.k = k;
+            } else if(m.id==='tree-reg'){
+              const tree = buildTree(Xtrain, ytrain, 0, 5, 5, 'regression');
+              const pred = Xtest.map(row=>predictTree(tree,row));
+              entry.metrics = regressionMetrics(ytest, pred);
+              entry.pred = pred; entry.actual = ytest;
+            } else if(m.id==='logreg'){
+              const W = trainSoftmax(Xtrain, ytrain, numClasses);
+              const pred = predictSoftmax(W, Xtest);
+              entry.metrics = classificationMetrics(ytest, pred, numClasses);
+              entry.pred = pred; entry.actual = ytest; entry.classes = classes;
+            } else if(m.id==='knn-clf'){
+              const k = knnK(Xtrain.length);
+              const pred = knnPredictAll(Xtrain, ytrain, Xtest, k, 'classification', numClasses);
+              entry.metrics = classificationMetrics(ytest, pred, numClasses);
+              entry.pred = pred; entry.actual = ytest; entry.classes = classes; entry.k = k;
+            } else if(m.id==='tree-clf'){
+              const tree = buildTree(Xtrain, ytrain, 0, 5, 5, 'classification', numClasses);
+              const pred = Xtest.map(row=>predictTree(tree,row));
+              entry.metrics = classificationMetrics(ytest, pred, numClasses);
+              entry.pred = pred; entry.actual = ytest; entry.classes = classes;
+            } else if(m.id==='nb'){
+              const model = trainGNB(Xtrain, ytrain, numClasses);
+              const pred = Xtest.map(row=>predictGNB(model,row));
+              entry.metrics = classificationMetrics(ytest, pred, numClasses);
+              entry.pred = pred; entry.actual = ytest; entry.classes = classes;
+            }
+            entry.trainMs = Math.round(performance.now()-t0);
+            entry.ok = true;
+          } catch(err){
+            entry.ok = false; entry.error = err.message;
+          }
+          results.push(entry);
+        });
+
+        state.results = {
+          problemType: state.problemType,
+          target: state.target,
+          nTrain: Xtrain.length,
+          nTest: Xtest.length,
+          entries: results,
+          classes
+        };
+        resetTrainButton();
+        renderResults();
+        goToStep(3);
+      }, 30);
+    } catch(err){
+      alert('Something went wrong while preparing the data: '+err.message);
+      resetTrainButton();
+    }
+  }, 30);
+}
+function resetTrainButton(){
+  document.getElementById('trainStatus').style.display='none';
+  document.getElementById('runBtn').disabled=false;
+}
+
+/* =========================================================================
+   RESULTS RENDERING
+   ========================================================================= */
+function destroyChart(id){ if(state.charts[id]){ state.charts[id].destroy(); delete state.charts[id]; } }
+
+function renderResults(){
+  const r = state.results;
+  const okEntries = r.entries.filter(e=>e.ok);
+  document.getElementById('resultsLede').textContent =
+    'Predicting "'+r.target+'" ('+r.problemType+') from '+state.features.length+' variable(s) · trained on '+r.nTrain+' rows, tested on '+r.nTest+' held-out rows.';
+
+  // Comparison chart
+  document.getElementById('comparisonSub').textContent = r.problemType==='regression'
+    ? 'Higher R² means the model explains more of the variance in the held-out data.'
+    : 'Accuracy on the held-out test rows for each model.';
+
+  destroyChart('comparisonChart');
+  const ctx = document.getElementById('comparisonChart').getContext('2d');
+  const labels = okEntries.map(e=>e.name);
+  const values = okEntries.map(e=> r.problemType==='regression' ? e.metrics.r2 : e.metrics.accuracy);
+  state.charts['comparisonChart'] = new Chart(ctx, {
+    type:'bar',
+    data:{ labels, datasets:[{
+      label: r.problemType==='regression' ? 'R²' : 'Accuracy',
+      data: values,
+      backgroundColor: 'rgba(79,209,197,0.55)',
+      borderColor: '#4fd1c5', borderWidth:1, borderRadius:6
+    }]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false} },
+      scales:{
+        y:{ beginAtZero:true, grid:{color:'#2b2f39'}, ticks:{color:'#8b909c'} },
+        x:{ grid:{display:false}, ticks:{color:'#8b909c'} }
+      }
+    }
+  });
+
+  // Per-model cards
+  const wrap = document.getElementById('modelCards');
+  wrap.innerHTML = '';
+  r.entries.forEach((e,idx)=>{
+    const card = document.createElement('div');
+    card.className='card';
+    if(!e.ok){
+      card.innerHTML = '<h3>'+e.name+'</h3><div class="warn-note">⚠ This model failed to train: '+escapeHtml(e.error||'unknown error')+'</div>';
+      wrap.appendChild(card);
+      return;
+    }
+    if(r.problemType==='regression'){
+      card.innerHTML = renderRegressionCard(e, idx);
+    } else {
+      card.innerHTML = renderClassificationCard(e, idx, r.classes);
+    }
+    wrap.appendChild(card);
+  });
+
+  // draw charts after DOM insert
+  r.entries.forEach((e,idx)=>{
+    if(!e.ok) return;
+    if(r.problemType==='regression') drawRegressionChart(e, idx);
+    else drawClassificationExtras(e, idx);
+  });
+}
+
+function renderRegressionCard(e, idx){
+  const m = e.metrics;
+  let coefHtml = '';
+  if(e.coef){
+    coefHtml = '<div class="chart-box small" style="margin-top:22px;"><canvas id="coefChart-'+idx+'"></canvas></div>'+
+      '<div class="confusion-legend">Coefficients are on standardized features, so magnitude reflects relative influence.</div>';
+  }
+  return '<h3>'+e.name+'</h3>'+
+    '<div class="card-sub">Trained in '+e.trainMs+' ms'+(e.k?' · k='+e.k:'')+'</div>'+
+    '<div class="metric-strip">'+
+      metricBox('R²', m.r2.toFixed(3))+
+      metricBox('RMSE', formatNum(m.rmse))+
+      metricBox('MAE', formatNum(m.mae))+
+      metricBox('MSE', formatNum(m.mse))+
+    '</div>'+
+    '<div class="chart-box"><canvas id="scatterChart-'+idx+'"></canvas></div>'+
+    coefHtml;
+}
+
+function drawRegressionChart(e, idx){
+  destroyChart('scatterChart-'+idx);
+  const ctx = document.getElementById('scatterChart-'+idx).getContext('2d');
+  const points = e.actual.map((a,i)=>({x:a, y:e.pred[i]}));
+  const lo = Math.min(...e.actual, ...e.pred), hi = Math.max(...e.actual, ...e.pred);
+  state.charts['scatterChart-'+idx] = new Chart(ctx,{
+    type:'scatter',
+    data:{ datasets:[
+      { label:'Test rows', data:points, backgroundColor:'rgba(79,209,197,0.6)', pointRadius:3 },
+      { label:'Perfect prediction', data:[{x:lo,y:lo},{x:hi,y:hi}], type:'line', borderColor:'#f2a65a', borderDash:[5,4], pointRadius:0, borderWidth:1.5 }
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{labels:{color:'#8b909c', font:{size:11}}} },
+      scales:{
+        x:{ title:{display:true,text:'Actual',color:'#8b909c'}, grid:{color:'#2b2f39'}, ticks:{color:'#8b909c'} },
+        y:{ title:{display:true,text:'Predicted',color:'#8b909c'}, grid:{color:'#2b2f39'}, ticks:{color:'#8b909c'} }
+      }
+    }
+  });
+  if(e.coef){
+    destroyChart('coefChart-'+idx);
+    const ctx2 = document.getElementById('coefChart-'+idx).getContext('2d');
+    const names = ['(bias)', ...e.featureMeta.map(f=>f.name)];
+    const vals = e.coef;
+    // sort by abs value, keep top 12 for readability
+    const paired = names.map((n,i)=>({n, v:vals[i]})).filter(p=>p.n!=='(bias)').sort((a,b)=>Math.abs(b.v)-Math.abs(a.v)).slice(0,12);
+    state.charts['coefChart-'+idx] = new Chart(ctx2,{
+      type:'bar',
+      data:{ labels:paired.map(p=>p.n), datasets:[{ data:paired.map(p=>p.v), backgroundColor: paired.map(p=>p.v>=0?'rgba(79,209,197,0.6)':'rgba(229,105,123,0.6)') }] },
+      options:{
+        indexAxis:'y', responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{display:false} },
+        scales:{ x:{grid:{color:'#2b2f39'}, ticks:{color:'#8b909c'}}, y:{grid:{display:false}, ticks:{color:'#8b909c', font:{size:10.5}}} }
+      }
+    });
+  }
+}
+
+function renderClassificationCard(e, idx, classes){
+  const m = e.metrics;
+  return '<h3>'+e.name+'</h3>'+
+    '<div class="card-sub">Trained in '+e.trainMs+' ms'+(e.k?' · k='+e.k:'')+'</div>'+
+    '<div class="metric-strip">'+
+      metricBox('Accuracy', (m.accuracy*100).toFixed(1)+'%')+
+      metricBox('Precision', m.precision.toFixed(3))+
+      metricBox('Recall', m.recall.toFixed(3))+
+      metricBox('F1 (macro)', m.f1.toFixed(3))+
+    '</div>'+
+    '<div class="compare-grid">'+
+      '<div><div class="card-sub" style="margin-top:14px;">Confusion matrix — rows are actual, columns predicted.</div>'+confusionTable(m.confusionMatrix, classes)+'</div>'+
+      '<div class="chart-box small"><canvas id="perclassChart-'+idx+'"></canvas></div>'+
+    '</div>';
+}
+
+function confusionTable(cm, classes){
+  const max = Math.max(...cm.flat(), 1);
+  let html = '<div class="table-wrap confusion-wrap"><table><thead><tr><th></th>'+classes.map(c=>'<th>'+escapeHtml(c)+'</th>').join('')+'</tr></thead><tbody>';
+  cm.forEach((row,i)=>{
+    html += '<tr><th>'+escapeHtml(classes[i])+'</th>'+row.map(v=>{
+      const alpha = 0.08 + 0.55*(v/max);
+      return '<td class="confusion-cell" style="background:rgba(79,209,197,'+alpha.toFixed(2)+')">'+v+'</td>';
+    }).join('')+'</tr>';
+  });
+  html += '</tbody></table></div>';
+  return html;
+}
+
+function drawClassificationExtras(e, idx){
+  destroyChart('perclassChart-'+idx);
+  const cm = e.metrics.confusionMatrix;
+  const classes = e.classes;
+  const perClassRecall = cm.map((row,i)=>{
+    const total = row.reduce((a,b)=>a+b,0);
+    return total>0 ? row[i]/total : 0;
+  });
+  const ctx = document.getElementById('perclassChart-'+idx).getContext('2d');
+  state.charts['perclassChart-'+idx] = new Chart(ctx, {
+    type:'bar',
+    data:{ labels:classes, datasets:[{ label:'Recall by class', data:perClassRecall, backgroundColor:'rgba(242,166,90,0.55)', borderColor:'#f2a65a', borderWidth:1, borderRadius:5 }] },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, title:{display:true, text:'Recall by class', color:'#8b909c', font:{size:11}} },
+      scales:{ y:{min:0,max:1, grid:{color:'#2b2f39'}, ticks:{color:'#8b909c'}}, x:{grid:{display:false}, ticks:{color:'#8b909c', font:{size:10.5}}} }
+    }
+  });
+}
+
+function metricBox(label, value){
+  return '<div class="metric-box"><div class="m-label">'+label+'</div><div class="m-value">'+value+'</div></div>';
+}
+function formatNum(v){
+  if(Math.abs(v)>=1000) return v.toFixed(0);
+  if(Math.abs(v)>=10) return v.toFixed(1);
+  return v.toFixed(3);
+}
+
+function downloadSummaryCSV(){
+  const r = state.results;
+  if(!r) return;
+  let lines = [];
+  if(r.problemType==='regression'){
+    lines.push('model,r2,rmse,mae,mse,train_ms');
+    r.entries.filter(e=>e.ok).forEach(e=>lines.push([e.name, e.metrics.r2, e.metrics.rmse, e.metrics.mae, e.metrics.mse, e.trainMs].join(',')));
+  } else {
+    lines.push('model,accuracy,precision_macro,recall_macro,f1_macro,train_ms');
+    r.entries.filter(e=>e.ok).forEach(e=>lines.push([e.name, e.metrics.accuracy, e.metrics.precision, e.metrics.recall, e.metrics.f1, e.trainMs].join(',')));
+  }
+  const blob = new Blob([lines.join('\n')], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'bench-model-comparison.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
