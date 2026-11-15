@@ -83,6 +83,31 @@ The report also flags a constant target (fewer than 2 distinct non-null values) 
 
 Quartiles are linear percentiles. Standard deviation uses the sample divisor (n-1). Skew is the bias-corrected Fisher-Pearson coefficient. An IQR outlier sits outside `[Q1 - 1.5*IQR, Q3 + 1.5*IQR]`. A level is rare at or below 1% of non-null rows. High cardinality means 20 or more levels, or a different value on every non-null row when there are at least 10. A high correlation is `|r| >= 0.7`.
 
+## Classification models
+
+Prediction lives in `models/` and is separate from the EDA package. Each algorithm is its own application. `python -m models` fits all of them, including a soft voting ensemble, and selects the one with the highest mean cross-validated macro F1.
+
+The local folder `C:\Convergence\PredictiveModels\ConvergenceMLHub\Current_Usage_Models` was not available here. The applications follow that description: standard classifiers, tree ensembles, a soft vote across them, and a best-of selector.
+
+```bash
+python -m models --data PATH --target COLUMN --out DIR
+python -m models.logistic_regression --data PATH --target COLUMN --out DIR
+python -m models.decision_tree --data PATH --target COLUMN --out DIR
+python -m models.random_forest --data PATH --target COLUMN --out DIR
+python -m models.extra_trees --data PATH --target COLUMN --out DIR
+python -m models.gradient_boosting --data PATH --target COLUMN --out DIR
+python -m models.ada_boost --data PATH --target COLUMN --out DIR
+python -m models.svc --data PATH --target COLUMN --out DIR
+python -m models.knn --data PATH --target COLUMN --out DIR
+python -m models.naive_bayes --data PATH --target COLUMN --out DIR
+python -m models.voting --data PATH --target COLUMN --out DIR
+python -m models.best_of --data PATH --target COLUMN --out DIR
+```
+
+With no `--data` and no `--target`, the command uses `eda/data/sample_classification.csv` and target `churn`. A checked-in comparison is [models/examples/sample_report/report.md](models/examples/sample_report/report.md).
+
+The report includes cross-validated and holdout accuracy, precision, recall, F1 (macro and weighted), ROC-AUC, log loss, a confusion matrix, a majority-class baseline, and permutation importance on the original columns. Tree and logistic models also list their internal weights. Hyperparameters are fixed, not searched. The holdout is not used to pick the winner.
+
 ## Tests
 
 ```bash
@@ -94,7 +119,9 @@ python -m pytest tests
 - The file must be a UTF-8 CSV, and the whole table is loaded into memory.
 - The command fails if the file is empty, has a header but no rows, or does not contain `--target`.
 - Duplicate detection is an exact match on every column after parsing.
-- Correlation is Pearson, on pairwise-complete rows. There are no hypothesis tests and no model.
+- Correlation in the EDA report is Pearson, on pairwise-complete rows. That report does not fit a model. Classification fits live in `models/`.
 - The preview is the first 5 rows, not a random sample, and it shows at most 12 columns.
 - Charts show at most 10 levels of a categorical column, at most 40 columns on the missingness chart, and at most 9 panels per figure. Scatter plots draw at most 5000 points. The tables still use every row.
-- Empty cells are missing. The report does not impute them.
+- Empty cells are missing. The EDA report does not impute them. Classification imputes inside the training pipeline only.
+- Classification drops rows with a missing target and exact duplicate rows before the split. It needs at least 20 remaining rows, 2 to 30 classes, and at least 2 rows in every class.
+- Model hyperparameters are fixed. The winner is the highest mean cross-validated macro F1. On the classification sample, that model can still lose to a majority-class baseline on holdout accuracy.
